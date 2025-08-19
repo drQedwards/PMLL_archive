@@ -1,0 +1,88 @@
+# docker/docker-compose.yml
+version: '3.8'
+
+services:
+  pmll-core:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "50051:50051"  # gRPC
+      - "9090:9090"    # Prometheus metrics
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1
+      - PMLL_MEMORY_GB=64
+      - PMLL_COMPRESSION_RATIO=0.8960
+    volumes:
+      - pmll-data:/data
+      - ./config:/config
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [gpu]
+    depends_on:
+      - rabbitmq
+      - kafka
+      - prometheus
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=pmll
+      - RABBITMQ_DEFAULT_PASS=pmll_secret
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+    depends_on:
+      - zookeeper
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    ports:
+      - "2181:2181"
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana_dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - prometheus
+
+volumes:
+  pmll-data:
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:
